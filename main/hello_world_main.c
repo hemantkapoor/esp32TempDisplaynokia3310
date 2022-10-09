@@ -14,6 +14,7 @@
 #include "esp_spi_flash.h"
 #include "driver/gpio.h"
 #include "driver/spi_common.h"
+#include "driver/timer.h"
 #include "pcd8544.h"
 #include "thermistor.h"
 
@@ -22,10 +23,13 @@
 
 #define GPIO_BUTTON_PIN    GPIO_NUM_21
 #define GPIO_BUTTOM_PIN_SEL (1ULL << GPIO_BUTTON_PIN)
-#define DEBOUNCE_TIME_MS (1000U)
+
+#define TIMER_DIVIDER   (64)
 
 static void configureGpio(void);
 static void handleButtonPress(void* arg);
+static void configureTimer(void);
+static void timer_group_isr_callback();
 
 static volatile uint32_t currentButtonLevel = 1;
 static volatile uint32_t currentTimeMs = 0;
@@ -52,6 +56,7 @@ void app_main(void)
 
     configureGpio();
     initThermistor();
+    configureTimer();
 
     pcd8544_config_t config = {
         .spi_host = HSPI_HOST,
@@ -97,7 +102,7 @@ static void configureGpio(void)
         io_conf.pull_up_en = 0;
         //configure GPIO with the given settings
         gpio_config(&io_conf);
-         gpio_set_level(GPIO_LED_PIN, 1);
+         gpio_set_level(GPIO_LED_PIN, 0);
     }
 
 
@@ -106,7 +111,7 @@ static void configureGpio(void)
         //zero-initialize the config structure.
         gpio_config_t io_conf = {};
         //disable interrupt
-        io_conf.intr_type = GPIO_INTR_NEGEDGE;
+        io_conf.intr_type = GPIO_INTR_ANYEDGE;
         //set as output mode
         io_conf.mode = GPIO_MODE_INPUT;
         //bit mask of the pins that you want to set,e.g.GPIO18/19
@@ -125,17 +130,45 @@ static void configureGpio(void)
     }
 }
 
-static void handleButtonPress(void* arg)
+static void configureTimer(void)
 {
-    //uint32_t time = xTaskGetTickCount() / portTICK_PERIOD_MS;
-    //if( (currentTimeMs - time) < DEBOUNCE_TIME_MS) { return; }
-    //currentTimeMs = time;
+    timer_config_t config = 
+    {
+    .divider = TIMER_DIVIDER,
+    .counter_dir = TIMER_COUNT_UP,
+    .counter_en = TIMER_PAUSE,
+    .alarm_en = TIMER_ALARM_EN,
+    .auto_reload = TIMER_AUTORELOAD_DIS
+    };
+    timer_init(TIMER_GROUP_0, TIMER_0, &config);
+    timer_set_counter_value(TIMER_GROUP_0, TIMER_0, 0);
+    timer_set_alarm_value(TIMER_GROUP_0, TIMER_0, (TIMER_BASE_CLK / TIMER_DIVIDER));
+    timer_enable_intr(TIMER_GROUP_0, TIMER_0);
+    timer_isr_callback_add(TIMER_GROUP_0, TIMER_0, timer_group_isr_callback, NULL, 0);
+    
+}
+
+static void IRAM_ATTR handleButtonPress(void* arg)
+{
     uint32_t gpio_num = (uint32_t) arg;
 
     if(gpio_num == GPIO_BUTTON_PIN)
     {
-        gpio_set_level(GPIO_LED_PIN, currentButtonLevel);
-        currentButtonLevel = (currentButtonLevel == 0U? 1U : 0U);
+        /* If button pressed */
+        if(gpio_get_level(gpio_num) == 0)
+        {
+            configureTimer();
+            timer_start(TIMER_GROUP_0, TIMER_0);
+        }
+        else
+        {
+            timer_pause(TIMER_GROUP_0, TIMER_0);
+        }
     }
-    //printf("Button Pressed\n");
+}
+
+static void IRAM_ATTR timer_group_isr_callback()
+{
+    gpio_set_level(GPIO_LED_PIN, currentButtonLevel);
+    currentButtonLevel = (currentButtonLevel == 0U? 1U : 0U);    
 }

@@ -9,5 +9,8 @@
     ],
     "idf.portWin": "COM7",
     "idf.pythonBinPathWin": "C:\\Users\\Hemant\\.espressif\\python_env\\idf4.4_py3.8_env\\Scripts\\python.exe",
-    "idf.toolsPathWin": "C:\\Users\\Hemant\\.espressif"
+    "idf.toolsPathWin": "C:\\Users\\Hemant\\.espressif",
+    "files.associations": {
+        "complex": "c"
+    }
 }
